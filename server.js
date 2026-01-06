@@ -1,56 +1,66 @@
 const fastify = require('fastify')({ logger: true });
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 
-// Map countries to your proxy provider's strings
-const PROXY_MAP = {
-    'us': 'http://username-country-us:password@proxy-provider.com:8080',
-    'gb': 'http://username-country-gb:password@proxy-provider.com:8080',
-    'de': 'http://username-country-de:password@proxy-provider.com:8080'
-};
+// Use Stealth to avoid being blocked by Cloudflare/Google
+puppeteer.use(StealthPlugin());
 
-const checkDomain = async (targetUrl, countryCode) => {
-    const proxy = PROXY_MAP[countryCode] || null;
+// Configuration for Termux
+const CHROMIUM_PATH = '/data/data/com.termux/files/usr/bin/chromium';
+
+const checkDomain = async (targetUrl, proxy = null) => {
     const browser = await puppeteer.launch({
+        executablePath: CHROMIUM_PATH,
         headless: "new",
-        args: proxy ? [`--proxy-server=${proxy}`] : []
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            proxy ? `--proxy-server=${proxy}` : ''
+        ].filter(Boolean)
     });
 
     const page = await browser.newPage();
     
     try {
-        // 1. Authenticate proxy if needed
-        // await page.authenticate({ username: 'user', password: 'pass' });
+        // Set a realistic User Agent to further avoid detection
+        await page.setUserAgent('Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36');
 
-        // 2. Visit the site
+        // Visit site with a 20-second timeout
         await page.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 20000 });
 
-        // 3. Run detection
+        // Detection Logic
         const status = await page.evaluate(() => {
             return {
-                google_recaptcha: !!document.querySelector('iframe[src*="google.com/recaptcha"]'),
-                cloudflare_turnstile: !!document.querySelector('iframe[src*="challenges.cloudflare.com"]'),
-                cloudflare_waf: document.title.includes("Just a moment...")
+                google_recaptcha: !!document.querySelector('iframe[src*="google.com/recaptcha"]') || !!document.querySelector('.g-recaptcha'),
+                cloudflare_turnstile: !!document.querySelector('iframe[src*="challenges.cloudflare.com"]') || !!document.querySelector('.cf-turnstile'),
+                cloudflare_waf: document.title.includes("Just a moment...") || !!document.getElementById('cf-content'),
+                timestamp: new Date().toISOString()
             };
         });
 
         await browser.close();
-        return status;
+        return { url: targetUrl, ...status };
     } catch (err) {
         await browser.close();
-        return { error: err.message };
+        return { url: targetUrl, error: err.message };
     }
 };
 
-// API Endpoint: /check?url=https://example.com&country=us
+// API Endpoint: /check?url=https://example.com&proxy=http://user:pass@host:port
 fastify.get('/check', async (request, reply) => {
-    const { url, country } = request.query;
-    if (!url) return { error: "URL is required" };
+    const { url, proxy } = request.query;
+    if (!url) return reply.code(400).send({ error: "URL parameter is required" });
 
-    const result = await checkDomain(url, country);
+    const result = await checkDomain(url, proxy);
     return result;
 });
 
-fastify.listen({ port: 3000 }, (err) => {
-    if (err) throw err;
-    console.log('Server running at http://localhost:3000');
+// Start the server
+fastify.listen({ port: 3000, host: '0.0.0.0' }, (err) => {
+    if (err) {
+        fastify.log.error(err);
+        process.exit(1);
+    }
+    console.log('API running at http://localhost:3000/check');
 });

@@ -1,5 +1,5 @@
 {
-  "name": "captchachecker",
+  "name": "captchachecker2",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
@@ -12,7 +12,7 @@
   "type": "commonjs",
   "dependencies": {
     "fastify": "^5.6.2",
-    "puppeteer": "^24.34.0",
+    "puppeteer-core": "^24.34.0",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2"
   }
