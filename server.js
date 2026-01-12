@@ -1,16 +1,30 @@
 const fastify = require('fastify')({ logger: true });
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const os = require('os');
 
 // Use Stealth to avoid being blocked by Cloudflare/Google
 puppeteer.use(StealthPlugin());
 
-// Configuration for Termux
-const CHROMIUM_PATH = '/data/data/com.termux/files/usr/bin/chromium';
+// Configuration based on OS
+const getChromiumPath = () => {
+    const platform = os.platform();
+    if (platform === 'win32') {
+        // Windows - use Chrome channel
+        return null;
+    } else if (platform === 'darwin') {
+        // macOS
+        return '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+    } else {
+        // Linux/Termux
+        return '/data/data/com.termux/files/usr/bin/chromium';
+    }
+};
+
+const CHROMIUM_PATH = getChromiumPath();
 
 const checkDomain = async (targetUrl, proxy = null) => {
-    const browser = await puppeteer.launch({
-        executablePath: CHROMIUM_PATH,
+    const launchConfig = {
         headless: "new",
         args: [
             '--no-sandbox',
@@ -18,7 +32,17 @@ const checkDomain = async (targetUrl, proxy = null) => {
             '--disable-dev-shm-usage',
             proxy ? `--proxy-server=${proxy}` : ''
         ].filter(Boolean)
-    });
+    };
+
+    // Configure based on OS
+    if (CHROMIUM_PATH) {
+        launchConfig.executablePath = CHROMIUM_PATH;
+    } else if (os.platform() === 'win32') {
+        // Windows - use Chrome channel
+        launchConfig.channel = 'chrome';
+    }
+
+    const browser = await puppeteer.launch(launchConfig);
 
     const page = await browser.newPage();
     
